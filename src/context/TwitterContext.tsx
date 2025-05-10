@@ -7,6 +7,7 @@ interface Tweet {
   id: string;
   text: string;
   created_at: string;
+  media_url?: string | null;
   public_metrics?: {
     retweet_count: number;
     reply_count: number;
@@ -21,6 +22,8 @@ interface TwitterContextType {
   error: string | null;
   timeUntilRefresh: number;
   canRefresh: boolean;
+  lastRefreshTime: number | null;
+  fetchTweets: () => Promise<void>;
 }
 
 const TwitterContext = createContext<TwitterContextType | undefined>(undefined);
@@ -32,56 +35,136 @@ const TWITTER_USER_ID = '25073877'; // @sidhant's Twitter ID
 const getLastRefreshTime = (): number | null => {
   if (typeof window === 'undefined') return null;
   const stored = localStorage.getItem('lastRefreshTime');
-  return stored ? parseInt(stored, 10) : null;
+  if (!stored) {
+    // If no stored time, set it to now to start the cooldown
+    const now = Math.floor(Date.now() / 1000);
+    localStorage.setItem('lastRefreshTime', now.toString());
+    console.log('Initializing user timer:', {
+      timestamp: now,
+      readableTime: new Date(now * 1000).toISOString(),
+      cooldownDuration: COOLDOWN_DURATION
+    });
+    return now;
+  }
+  const time = parseInt(stored, 10);
+  console.log('Retrieved user timer:', {
+    timestamp: time,
+    readableTime: new Date(time * 1000).toISOString(),
+    timeSinceLastRefresh: Math.floor(Date.now() / 1000) - time
+  });
+  return time;
 };
 
 // Save last refresh time to localStorage
 const saveLastRefreshTime = (timestamp: number) => {
   if (typeof window === 'undefined') return;
   localStorage.setItem('lastRefreshTime', timestamp.toString());
+  console.log('Updated user timer:', {
+    timestamp: timestamp,
+    readableTime: new Date(timestamp * 1000).toISOString(),
+    cooldownEnds: new Date((timestamp + COOLDOWN_DURATION) * 1000).toISOString()
+  });
 };
 
 export function TwitterProvider({ children }: { children: React.ReactNode }) {
   const [tweets, setTweets] = useState<Tweet[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshTime, setLastRefreshTime] = useState<number | null>(getLastRefreshTime());
-  const [timeUntilRefresh, setTimeUntilRefresh] = useState(0);
+  const [timeUntilRefresh, setTimeUntilRefresh] = useState(COOLDOWN_DURATION);
+
+  // Calculate if we can refresh
+  const canRefresh = !lastRefreshTime || 
+    (Math.floor(Date.now() / 1000) - lastRefreshTime) >= COOLDOWN_DURATION;
 
   const fetchTweets = async () => {
+    // Double check if we can refresh
+    const currentTime = Math.floor(Date.now() / 1000);
+    const timeSinceLastRefresh = lastRefreshTime ? currentTime - lastRefreshTime : COOLDOWN_DURATION;
+    const canRefreshNow = timeSinceLastRefresh >= COOLDOWN_DURATION;
+
+    console.log('Refresh attempt:', {
+      currentTime: new Date(currentTime * 1000).toISOString(),
+      lastRefreshTime: lastRefreshTime ? new Date(lastRefreshTime * 1000).toISOString() : 'Never',
+      timeSinceLastRefresh,
+      canRefreshNow
+    });
+
+    if (!canRefreshNow) {
+      const remainingTime = COOLDOWN_DURATION - timeSinceLastRefresh;
+      setError(`Please wait ${Math.ceil(remainingTime / 60)} minutes before refreshing again`);
+      console.log('Refresh blocked:', {
+        remainingTime,
+        nextRefreshTime: new Date((currentTime + remainingTime) * 1000).toISOString()
+      });
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
       const response = await axios.get('/api/twitter');
-      setTweets(response.data.tweets || []);
-      const currentTime = Math.floor(Date.now() / 1000);
-      setLastRefreshTime(currentTime);
-      saveLastRefreshTime(currentTime);
+      
+      if (response.data.tweets) {
+        setTweets(response.data.tweets);
+        setLastRefreshTime(currentTime);
+        saveLastRefreshTime(currentTime);
+        console.log('Tweets fetched successfully:', {
+          timestamp: currentTime,
+          readableTime: new Date(currentTime * 1000).toISOString(),
+          tweetCount: response.data.tweets.length
+        });
+      } else {
+        throw new Error('Invalid response format from Twitter API');
+      }
     } catch (err: any) {
-      console.error('Error fetching tweets:', err);
-      setError(err.response?.data?.details || 'Failed to load tweets. Please try again later.');
+      console.error('Error fetching tweets:', {
+        error: err.message,
+        status: err.response?.status,
+        data: err.response?.data,
+        timestamp: new Date().toISOString()
+      });
+      if (err.response?.status === 429) {
+        setError('Rate limit exceeded. Please wait 15 minutes before trying again.');
+        // Force cooldown on rate limit
+        setLastRefreshTime(currentTime);
+        saveLastRefreshTime(currentTime);
+      } else {
+        setError(err.response?.data?.details || 'Failed to load tweets. Please try again later.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Check cooldown status every second
+  // Initialize timers and check cooldown status every second
   useEffect(() => {
     const checkCooldown = () => {
+      const currentTime = Math.floor(Date.now() / 1000);
+      
       if (!lastRefreshTime) {
-        setTimeUntilRefresh(0);
+        setTimeUntilRefresh(COOLDOWN_DURATION);
+        console.log('No last refresh time, using full cooldown:', {
+          currentTime: new Date(currentTime * 1000).toISOString(),
+          cooldownDuration: COOLDOWN_DURATION
+        });
         return;
       }
 
-      const currentTime = Math.floor(Date.now() / 1000);
       const timeSinceLastRefresh = currentTime - lastRefreshTime;
       const remainingTime = Math.max(0, COOLDOWN_DURATION - timeSinceLastRefresh);
       
       setTimeUntilRefresh(remainingTime);
 
-      // If cooldown is over, fetch new tweets
-      if (remainingTime === 0 && !loading) {
-        fetchTweets();
+      // Log timer status every 5 seconds to avoid console spam
+      if (remainingTime % 5 === 0) {
+        console.log('Timer status:', {
+          currentTime: new Date(currentTime * 1000).toISOString(),
+          lastRefreshTime: new Date(lastRefreshTime * 1000).toISOString(),
+          timeSinceLastRefresh,
+          remainingTime,
+          nextRefreshTime: new Date((lastRefreshTime + COOLDOWN_DURATION) * 1000).toISOString()
+        });
       }
     };
 
@@ -91,21 +174,16 @@ export function TwitterProvider({ children }: { children: React.ReactNode }) {
     // Set up interval
     const timer = setInterval(checkCooldown, 1000);
     return () => clearInterval(timer);
-  }, [lastRefreshTime, loading]);
-
-  // Initial fetch if no cooldown
-  useEffect(() => {
-    if (!lastRefreshTime) {
-      fetchTweets();
-    }
-  }, []);
+  }, [lastRefreshTime]);
 
   const value = {
     tweets,
     loading,
     error,
     timeUntilRefresh,
-    canRefresh: timeUntilRefresh === 0
+    canRefresh,
+    lastRefreshTime,
+    fetchTweets
   };
 
   return (

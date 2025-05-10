@@ -16,45 +16,102 @@ export default function TwitterSection() {
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [showAllTweets, setShowAllTweets] = useState(false);
+  const [timeUntilRefresh, setTimeUntilRefresh] = useState(15 * 60); // Start with 15 minutes
+  const [canRefresh, setCanRefresh] = useState(false);
+
+  // Format countdown for display
+  const formatCountdown = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = seconds % 60;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Move fetchTweets to top-level so it can be used in useEffect and as a handler
+  const fetchTweets = async (showLoading = true) => {
+    try { 
+      if (showLoading) {
+        setLoading(true);
+      }
+      // Fetch data from API that serves the same cached data to all users
+      const response = await axios.get('/api/twitter');
+      console.log('Response received:', response.data); // Log the response data
+      
+      // Update timer and refresh status
+      if (response.data.timeUntilRefresh !== undefined) {
+        setTimeUntilRefresh(response.data.timeUntilRefresh);
+        console.log('Client timer updated:', {
+          timeUntilRefresh: response.data.timeUntilRefresh,
+          canRefresh: response.data.canRefresh
+        });
+      }
+      
+      if (response.data.canRefresh !== undefined) {
+        setCanRefresh(response.data.canRefresh);
+      }
+      
+      // Update tweets if we have them
+      if (response.data.tweets && (response.data.tweets.length > 0 || tweets.length === 0)) {
+        setTweets(response.data.tweets);
+      }
+      
+      const now = new Date();
+      const formattedTime = now.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      setLastUpdated(formattedTime);
+      setError('');
+    } catch (err: any) {
+      console.error('Error fetching tweets:', err);
+      
+      // Update the timer even on error if available
+      if (err.response?.data?.timeUntilRefresh !== undefined) {
+        setTimeUntilRefresh(err.response.data.timeUntilRefresh);
+        console.log('Client timer updated from error response:', {
+          timeUntilRefresh: err.response.data.timeUntilRefresh,
+          canRefresh: err.response.data.canRefresh
+        });
+      }
+      
+      if (err.response?.data?.canRefresh !== undefined) {
+        setCanRefresh(err.response.data.canRefresh);
+      }
+      
+      if (tweets.length === 0) {
+        setError(err.response?.data?.details || 'Failed to load tweets. Updates will be attempted automatically.');
+      }
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  };
 
   // Fetch data on component mount
   useEffect(() => {
-    const fetchTweets = async (showLoading = true) => {
-      try {
-        if (showLoading) {
-          setLoading(true);
-        }
-        // Fetch data from API that serves the same cached data to all users
-        const response = await axios.get('/api/twitter');
-        console.log('Response received:', response.data); // Log the response data
-        if (response.data.tweets.length > 0 || tweets.length === 0) {
-          setTweets(response.data.tweets);
-        }
-        const now = new Date();
-        const formattedTime = now.toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        });
-        setLastUpdated(formattedTime);
-        setError('');
-      } catch (err) {
-        console.error('Error fetching tweets:', err);
-        if (tweets.length === 0) {
-          setError('Failed to load tweets. Updates will be attempted automatically.');
-        }
-      } finally {
-        if (showLoading) {
-          setLoading(false);
-        }
-      }
-    };
     fetchTweets();
-    const intervalId = setInterval(() => {
+    
+    // Set up interval to update timer every second
+    const timerIntervalId = setInterval(() => {
+      setTimeUntilRefresh(prev => {
+        // If timer reaches 0, allow refresh
+        if (prev <= 1) {
+          setCanRefresh(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    // Set up interval to check for updates
+    const updateIntervalId = setInterval(() => {
       if (document.visibilityState === 'visible') {
         fetchTweets(false);
       }
     }, 300000);
+    
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && lastUpdated) {
         const lastUpdateTime = new Date(lastUpdated).getTime();
@@ -65,12 +122,15 @@ export default function TwitterSection() {
         }
       }
     };
+    
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    
     return () => {
-      clearInterval(intervalId);
+      clearInterval(timerIntervalId);
+      clearInterval(updateIntervalId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [tweets.length, lastUpdated]);
+  }, [lastUpdated]);
 
   // Function to format date consistently
   const formatTweetDate = (dateString: string) => {
@@ -103,6 +163,20 @@ export default function TwitterSection() {
   if (loading && tweets.length === 0) {
     return (
       <div className="animate-pulse space-y-6">
+        <div className="flex justify-between items-center text-bloomberg-xs text-gray-500 dark:text-gray-400 mb-4">
+          <div className="flex items-center">
+            <span className="inline-block w-1 h-3 bg-orange-500 dark:bg-orange-500 mr-1"></span>
+            <span className="uppercase font-semibold tracking-wider">Source: <a href="https://x.com/sidhant" target="_blank" rel="noopener noreferrer" className="text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 no-underline">@sidhant</a></span>
+          </div>
+          <div className="text-right bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
+            <span className="text-sm text-gray-500 dark:text-gray-400 block">
+              Next update available in:
+            </span>
+            <span className="text-xl font-bold text-gray-700 dark:text-gray-300">
+              {formatCountdown(timeUntilRefresh)}
+            </span>
+          </div>
+        </div>
         {[...Array(3)].map((_, index) => (
           <div key={index} className="tweet-card animate-pulse">
             <div className="flex justify-between items-center mb-3">
@@ -116,14 +190,6 @@ export default function TwitterSection() {
             </div>
           </div>
         ))}
-      </div>
-    );
-  }
-
-  if (error && tweets.length === 0) {
-    return (
-      <div className="p-4 bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 rounded shadow-sm">
-        <p className="text-red-700 dark:text-red-400">{error}</p>
       </div>
     );
   }
@@ -157,13 +223,34 @@ export default function TwitterSection() {
           <span className="inline-block w-1 h-3 bg-orange-500 dark:bg-orange-500 mr-1"></span>
           <span className="uppercase font-semibold tracking-wider">Source: <a href="https://x.com/sidhant" target="_blank" rel="noopener noreferrer" className="text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 no-underline">@sidhant</a></span>
         </div>
-        {lastUpdated && (
-          <div className="datetime-display">
-            <span className="uppercase">Updated: {lastUpdated}</span>
-            {loading && <span className="ml-2 italic text-xs">Refreshing...</span>}
+        <div className="flex items-center gap-4">
+          <div className="text-right bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
+            <span className="text-sm text-gray-500 dark:text-gray-400 block">
+              Next update available in:
+            </span>
+            <span className="text-xl font-bold text-gray-700 dark:text-gray-300">
+              {formatCountdown(timeUntilRefresh)}
+            </span>
           </div>
-        )}
+          <button
+            onClick={() => fetchTweets()}
+            disabled={!canRefresh || loading}
+            className={`px-4 py-2 rounded-md text-white font-medium ${
+              (!canRefresh || loading)
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-blue-500 hover:bg-blue-600'
+            }`}
+          >
+            {loading ? 'Refreshing...' : 'Refresh Tweets'}
+          </button>
+        </div>
       </div>
+      
+      {error && (
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 rounded shadow-sm mb-4">
+          <p className="text-red-700 dark:text-red-400">{error}</p>
+        </div>
+      )}
       
       {tweets.length === 0 ? (
         <p className="text-gray-500 dark:text-gray-400">No tweets available.</p>

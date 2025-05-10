@@ -22,7 +22,6 @@ export default function TwitterSection() {
   const [tweets, setTweets] = useState<Tweet[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [lastUpdated, setLastUpdated] = useState<string>('');
   const [showAllTweets, setShowAllTweets] = useState(false);
   const [timeUntilRefresh, setTimeUntilRefresh] = useState(15 * 60); // Start with 15 minutes
   const [canRefresh, setCanRefresh] = useState(false);
@@ -71,13 +70,6 @@ export default function TwitterSection() {
         setTweets(response.data.tweets);
       }
       
-      const now = new Date();
-      const formattedTime = now.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-      setLastUpdated(formattedTime);
       setError('');
     } catch (err) {
       const error = err as AxiosError<TwitterResponse>;

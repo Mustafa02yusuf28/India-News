@@ -68,7 +68,7 @@ export async function GET() {
     const tweets = await fetchLatestTweets();
     await kv.set('twitter-tweets', JSON.stringify({ tweets, timestamp: Date.now() }));
     return NextResponse.json({ success: true, count: tweets.length });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to refresh tweets' }, { status: 500 });
   }
 } 

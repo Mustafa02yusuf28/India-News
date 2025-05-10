@@ -26,6 +26,7 @@ export default function TwitterSection() {
         }
         // Fetch data from API that serves the same cached data to all users
         const response = await axios.get('/api/twitter');
+        console.log('Response received:', response.data); // Log the response data
         if (response.data.tweets.length > 0 || tweets.length === 0) {
           setTweets(response.data.tweets);
         }

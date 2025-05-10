@@ -14,6 +14,7 @@ interface TwitterResponse {
   tweets: Tweet[];
   timeUntilRefresh: number;
   canRefresh: boolean;
+  lastRefreshTime: number | null; // Add this to get global timer info
   error?: string;
   details?: string;
 }
@@ -23,8 +24,10 @@ export default function TwitterSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showAllTweets, setShowAllTweets] = useState(false);
-  const [timeUntilRefresh, setTimeUntilRefresh] = useState(15 * 60); // Start with 15 minutes
+  const [timeUntilRefresh, setTimeUntilRefresh] = useState(15 * 60); // User timer - 15 minutes
   const [canRefresh, setCanRefresh] = useState(false);
+  const [globalTimeUntilRefresh, setGlobalTimeUntilRefresh] = useState(15 * 60); // Global timer - 15 minutes
+  const [globalTimerLastUpdated, setGlobalTimerLastUpdated] = useState<string | null>(null);
 
   // Format countdown for display
   const formatCountdown = (seconds: number) => {
@@ -34,12 +37,54 @@ export default function TwitterSection() {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  // Format time in IST
+  const formatInIST = (date: Date): string => {
+    return date.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+  };
+
+  // Check global timer status
+  const checkGlobalTimer = async () => {
+    try {
+      // Make a HEAD request to avoid fetching data
+      const response = await axios.head('/api/twitter');
+      // Get the global timer info from headers
+      const globalLastRefresh = response.headers['x-last-refresh-time'];
+      
+      if (globalLastRefresh) {
+        const currentTime = Math.floor(Date.now() / 1000);
+        const lastRefreshTime = parseInt(globalLastRefresh, 10);
+        const COOLDOWN_DURATION = 15 * 60; // 15 minutes in seconds
+        
+        const timeSinceLastRefresh = currentTime - lastRefreshTime;
+        const globalRemaining = Math.max(0, COOLDOWN_DURATION - timeSinceLastRefresh);
+        
+        setGlobalTimeUntilRefresh(globalRemaining);
+        setGlobalTimerLastUpdated(formatInIST(new Date()));
+        
+        console.log('Global timer checked:', {
+          globalTimeUntilRefresh: globalRemaining,
+          lastRefreshTime,
+          currentTime,
+          formattedTime: formatInIST(new Date(lastRefreshTime * 1000))
+        });
+      }
+    } catch (err) {
+      console.error('Error checking global timer:', err);
+    }
+  };
+
   // Move fetchTweets to top-level so it can be used in useEffect and as a handler
   const fetchTweets = async (showLoading = true) => {
     try { 
       // Only proceed if we can refresh - double check here
       if (!canRefresh) {
-        console.log('Fetch prevented - timer not expired yet');
+        console.log('Fetch prevented - user timer not expired yet');
         setError(`Please wait ${formatCountdown(timeUntilRefresh)} before refreshing again`);
         return;
       }
@@ -52,10 +97,10 @@ export default function TwitterSection() {
       const response = await axios.get<TwitterResponse>('/api/twitter');
       console.log('Response received:', response.data); // Log the response data
       
-      // Update timer and refresh status
+      // Update user timer and refresh status
       if (response.data.timeUntilRefresh !== undefined) {
         setTimeUntilRefresh(response.data.timeUntilRefresh);
-        console.log('Client timer updated:', {
+        console.log('User timer updated:', {
           timeUntilRefresh: response.data.timeUntilRefresh,
           canRefresh: response.data.canRefresh
         });
@@ -63,6 +108,17 @@ export default function TwitterSection() {
       
       if (response.data.canRefresh !== undefined) {
         setCanRefresh(response.data.canRefresh);
+      }
+      
+      // Update global timer info
+      if (response.data.lastRefreshTime) {
+        const currentTime = Math.floor(Date.now() / 1000);
+        const COOLDOWN_DURATION = 15 * 60; // 15 minutes in seconds
+        const timeSinceLastRefresh = currentTime - response.data.lastRefreshTime;
+        const globalRemaining = Math.max(0, COOLDOWN_DURATION - timeSinceLastRefresh);
+        
+        setGlobalTimeUntilRefresh(globalRemaining);
+        setGlobalTimerLastUpdated(formatInIST(new Date()));
       }
       
       // Update tweets if we have them
@@ -78,7 +134,7 @@ export default function TwitterSection() {
       // Update the timer even on error if available
       if (error.response?.data?.timeUntilRefresh !== undefined) {
         setTimeUntilRefresh(error.response.data.timeUntilRefresh);
-        console.log('Client timer updated from error response:', {
+        console.log('User timer updated from error response:', {
           timeUntilRefresh: error.response.data.timeUntilRefresh,
           canRefresh: error.response.data.canRefresh
         });
@@ -100,8 +156,11 @@ export default function TwitterSection() {
 
   // ONLY update the timer - NO automatic API calls on mount
   useEffect(() => {
-    // Set up interval to update timer every second
-    const timerIntervalId = setInterval(() => {
+    // Check global timer status on mount
+    checkGlobalTimer();
+    
+    // Set up interval to update user timer every second
+    const userTimerIntervalId = setInterval(() => {
       setTimeUntilRefresh(prev => {
         // If timer reaches 0, allow refresh
         if (prev <= 1) {
@@ -112,15 +171,29 @@ export default function TwitterSection() {
       });
     }, 1000);
     
+    // Set up interval to update global timer every second
+    const globalTimerIntervalId = setInterval(() => {
+      setGlobalTimeUntilRefresh(prev => {
+        return Math.max(0, prev - 1);
+      });
+      
+      // Check global timer from server every minute
+      if (Math.floor(Date.now() / 1000) % 60 === 0) {
+        checkGlobalTimer();
+      }
+    }, 1000);
+    
     // Log the initial timer state
     console.log('Timer initialized:', {
-      timeUntilRefresh,
+      userTimer: timeUntilRefresh,
+      globalTimer: globalTimeUntilRefresh,
       canRefresh,
-      currentTime: new Date().toISOString()
+      currentTime: formatInIST(new Date())
     });
     
     return () => {
-      clearInterval(timerIntervalId);
+      clearInterval(userTimerIntervalId);
+      clearInterval(globalTimerIntervalId);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
@@ -129,15 +202,17 @@ export default function TwitterSection() {
   const formatTweetDate = (dateString: string) => {
     const date = new Date(dateString);
     return {
-      date: date.toLocaleDateString('en-US', {
+      date: date.toLocaleDateString('en-IN', {
         month: 'numeric',
         day: 'numeric',
-        year: 'numeric'
+        year: 'numeric',
+        timeZone: 'Asia/Kolkata'
       }),
-      time: date.toLocaleTimeString('en-US', {
+      time: date.toLocaleTimeString('en-IN', {
         hour: '2-digit',
         minute: '2-digit',
-        hour12: false
+        hour12: true,
+        timeZone: 'Asia/Kolkata'
       })
     };
   };
@@ -161,13 +236,23 @@ export default function TwitterSection() {
             <span className="inline-block w-1 h-3 bg-orange-500 dark:bg-orange-500 mr-1"></span>
             <span className="uppercase font-semibold tracking-wider">Source: <a href="https://x.com/sidhant" target="_blank" rel="noopener noreferrer" className="text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 no-underline">@sidhant</a></span>
           </div>
-          <div className="text-right bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
-            <span className="text-sm text-gray-500 dark:text-gray-400 block">
-              Next update available in:
-            </span>
-            <span className="text-xl font-bold text-gray-700 dark:text-gray-300">
-              {formatCountdown(timeUntilRefresh)}
-            </span>
+          <div className="flex flex-col gap-2">
+            <div className="text-right bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
+              <span className="text-sm text-gray-500 dark:text-gray-400 block">
+                Your Cooldown Timer:
+              </span>
+              <span className="text-xl font-bold text-gray-700 dark:text-gray-300">
+                {formatCountdown(timeUntilRefresh)}
+              </span>
+            </div>
+            <div className="text-right bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+              <span className="text-sm text-blue-500 dark:text-blue-400 block">
+                Global Cooldown Timer:
+              </span>
+              <span className="text-xl font-bold text-blue-700 dark:text-blue-300">
+                {formatCountdown(globalTimeUntilRefresh)}
+              </span>
+            </div>
           </div>
         </div>
         {[...Array(3)].map((_, index) => (
@@ -211,24 +296,37 @@ export default function TwitterSection() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center text-bloomberg-xs text-gray-500 dark:text-gray-400 mb-4">
+      <div className="flex justify-between items-start text-bloomberg-xs text-gray-500 dark:text-gray-400 mb-4">
         <div className="flex items-center">
           <span className="inline-block w-1 h-3 bg-orange-500 dark:bg-orange-500 mr-1"></span>
           <span className="uppercase font-semibold tracking-wider">Source: <a href="https://x.com/sidhant" target="_blank" rel="noopener noreferrer" className="text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 no-underline">@sidhant</a></span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-2">
           <div className="text-right bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
             <span className="text-sm text-gray-500 dark:text-gray-400 block">
-              Next update available in:
+              Your Cooldown Timer:
             </span>
             <span className="text-xl font-bold text-gray-700 dark:text-gray-300">
               {formatCountdown(timeUntilRefresh)}
             </span>
           </div>
+          <div className="text-right bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+            <span className="text-sm text-blue-500 dark:text-blue-400 block">
+              Global Cooldown Timer:
+            </span>
+            <span className="text-xl font-bold text-blue-700 dark:text-blue-300">
+              {formatCountdown(globalTimeUntilRefresh)}
+            </span>
+            {globalTimerLastUpdated && (
+              <span className="text-xs text-blue-500 dark:text-blue-400 block mt-1">
+                Last checked: {globalTimerLastUpdated} IST
+              </span>
+            )}
+          </div>
           <button
             onClick={() => fetchTweets()}
             disabled={!canRefresh || loading}
-            className={`px-4 py-2 rounded-md text-white font-medium ${
+            className={`px-4 py-2 rounded-md text-white font-medium mt-2 w-full ${
               (!canRefresh || loading)
                 ? 'bg-gray-400 cursor-not-allowed'
                 : 'bg-blue-500 hover:bg-blue-600'

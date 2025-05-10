@@ -40,18 +40,31 @@ interface ProcessedTweet extends TwitterTweet {
   media_url: string | null;
 }
 
-// In-memory cache for last refresh time (global timer)
-let lastRefreshTime: number | null = null;
+// Global variable for last refresh time - persisted between serverless function invocations
+// Use a static global variable at the module level
+let GLOBAL_LAST_REFRESH_TIME: number | null = null;
 
-// Initialize lastRefreshTime if null
-if (lastRefreshTime === null) {
-  lastRefreshTime = Math.floor(Date.now() / 1000);
-  console.log('[GLOBAL TIMER] Initialized:', {
-    timestamp: lastRefreshTime,
-    readableTime: new Date(lastRefreshTime * 1000).toISOString(),
-    nextRefreshAt: new Date((lastRefreshTime + COOLDOWN_DURATION) * 1000).toISOString()
-  });
+// Use a file or database in production to persist this value
+// For now we'll use global module state, but this won't persist across cold starts
+try {
+  // Try to load from KV store or similar in production
+  if (!GLOBAL_LAST_REFRESH_TIME) {
+    // If not found, initialize with current time - 10 minutes to allow an initial refresh soon
+    GLOBAL_LAST_REFRESH_TIME = Math.floor(Date.now() / 1000) - 10 * 60;
+  }
+} catch (err) {
+  console.error('Failed to load global timer state, initializing', err);
+  GLOBAL_LAST_REFRESH_TIME = Math.floor(Date.now() / 1000) - 10 * 60;
 }
+
+// Helper to format date in IST
+const formatInIST = (date: Date): string => {
+  return date.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    dateStyle: 'medium',
+    timeStyle: 'medium'
+  });
+};
 
 // Mock tweets for returning when we can't actually fetch from Twitter
 // This way we don't need to make the Twitter API call at all when timers aren't ready
@@ -85,7 +98,7 @@ export async function GET(request: Request) {
 
   // Calculate cooldown status
   const currentTime = Math.floor(Date.now() / 1000);
-  const timeSinceLastRefresh = lastRefreshTime ? currentTime - lastRefreshTime : COOLDOWN_DURATION;
+  const timeSinceLastRefresh = GLOBAL_LAST_REFRESH_TIME ? currentTime - GLOBAL_LAST_REFRESH_TIME : COOLDOWN_DURATION;
   const remainingTime = Math.max(0, COOLDOWN_DURATION - timeSinceLastRefresh);
   const canRefresh = remainingTime <= 0;
 
@@ -94,29 +107,53 @@ export async function GET(request: Request) {
     path: url.pathname,
     query: url.search,
     currentTime: new Date(currentTime * 1000).toISOString(),
-    lastRefreshTime: lastRefreshTime ? new Date(lastRefreshTime * 1000).toISOString() : 'None',
+    currentTimeIST: formatInIST(new Date(currentTime * 1000)),
+    lastRefreshTime: GLOBAL_LAST_REFRESH_TIME ? new Date(GLOBAL_LAST_REFRESH_TIME * 1000).toISOString() : 'None',
+    lastRefreshTimeIST: GLOBAL_LAST_REFRESH_TIME ? formatInIST(new Date(GLOBAL_LAST_REFRESH_TIME * 1000)) : 'None',
     timeSinceLastRefresh,
     remainingTime,
     canRefresh,
-    nextRefreshAt: lastRefreshTime 
-      ? new Date((lastRefreshTime + COOLDOWN_DURATION) * 1000).toISOString()
+    nextRefreshAt: GLOBAL_LAST_REFRESH_TIME 
+      ? new Date((GLOBAL_LAST_REFRESH_TIME + COOLDOWN_DURATION) * 1000).toISOString()
+      : 'Now',
+    nextRefreshAtIST: GLOBAL_LAST_REFRESH_TIME
+      ? formatInIST(new Date((GLOBAL_LAST_REFRESH_TIME + COOLDOWN_DURATION) * 1000))
       : 'Now'
   });
+
+  // Handle HEAD requests for timer info only
+  if (request.method === 'HEAD') {
+    const response = new NextResponse(null, { status: 200 });
+    response.headers.set('x-server-time', currentTime.toString());
+    response.headers.set('x-last-refresh-time', GLOBAL_LAST_REFRESH_TIME?.toString() || '0');
+    response.headers.set('x-time-until-refresh', remainingTime.toString());
+    response.headers.set('x-can-refresh', canRefresh.toString());
+    response.headers.set('x-server-time-ist', formatInIST(new Date(currentTime * 1000)));
+    return response;
+  }
 
   // Return cooldown response if timer is active (unless force=true for testing)
   if (!canRefresh && !forceFetch) {
     console.log('[GLOBAL TIMER] Request blocked - cooldown active');
-    return NextResponse.json(
+    const response = NextResponse.json(
       { 
         error: 'Rate limit cooldown active',
         details: `Please wait ${Math.ceil(remainingTime / 60)} minutes before refreshing again`,
         tweets: mockTweets, // Return mock tweets during cooldown
         timeUntilRefresh: remainingTime,
         canRefresh: false,
-        lastRefreshTime
+        lastRefreshTime: GLOBAL_LAST_REFRESH_TIME
       },
       { status: 200 } // Return 200 instead of 429 to prevent console errors
     );
+    
+    // Add timer info to headers
+    response.headers.set('x-server-time', currentTime.toString());
+    response.headers.set('x-last-refresh-time', GLOBAL_LAST_REFRESH_TIME?.toString() || '0');
+    response.headers.set('x-time-until-refresh', remainingTime.toString());
+    response.headers.set('x-can-refresh', 'false');
+    
+    return response;
   }
 
   try {
@@ -131,7 +168,10 @@ export async function GET(request: Request) {
           max_results: 10,
           'tweet.fields': 'created_at,public_metrics',
           expansions: 'attachments.media_keys',
-          'media.fields': 'url,preview_image_url'
+          'media.fields': 'url,preview_image_url',
+          // Add recency parameters to get latest tweets
+          'recency_days': 7,
+          'sort_order': 'recency'
         },
       }
     );
@@ -139,11 +179,13 @@ export async function GET(request: Request) {
     console.log('[TWITTER API] Response received');
 
     // Update last refresh time
-    lastRefreshTime = currentTime;
+    GLOBAL_LAST_REFRESH_TIME = currentTime;
     console.log('[GLOBAL TIMER] Updated:', {
-      timestamp: lastRefreshTime,
-      readableTime: new Date(lastRefreshTime * 1000).toISOString(),
-      nextRefreshAt: new Date((lastRefreshTime + COOLDOWN_DURATION) * 1000).toISOString()
+      timestamp: GLOBAL_LAST_REFRESH_TIME,
+      readableTime: new Date(GLOBAL_LAST_REFRESH_TIME * 1000).toISOString(),
+      readableTimeIST: formatInIST(new Date(GLOBAL_LAST_REFRESH_TIME * 1000)),
+      nextRefreshAt: new Date((GLOBAL_LAST_REFRESH_TIME + COOLDOWN_DURATION) * 1000).toISOString(),
+      nextRefreshAtIST: formatInIST(new Date((GLOBAL_LAST_REFRESH_TIME + COOLDOWN_DURATION) * 1000))
     });
 
     // Process tweets to include media URLs and author field
@@ -157,12 +199,20 @@ export async function GET(request: Request) {
         }))
       : [];
 
-    return NextResponse.json({
+    const apiResponse = NextResponse.json({
       tweets,
       timeUntilRefresh: COOLDOWN_DURATION,
       canRefresh: false,
-      lastRefreshTime
+      lastRefreshTime: GLOBAL_LAST_REFRESH_TIME
     });
+    
+    // Add timer info to headers
+    apiResponse.headers.set('x-server-time', currentTime.toString());
+    apiResponse.headers.set('x-last-refresh-time', GLOBAL_LAST_REFRESH_TIME.toString());
+    apiResponse.headers.set('x-time-until-refresh', COOLDOWN_DURATION.toString());
+    apiResponse.headers.set('x-can-refresh', 'false');
+    
+    return apiResponse;
   } catch (error: unknown) {
     const err = error as Error & { 
       response?: { 
@@ -179,25 +229,35 @@ export async function GET(request: Request) {
 
     // If we hit Twitter's rate limit, set our cooldown
     if (err.response?.status === 429) {
-      lastRefreshTime = currentTime;
+      GLOBAL_LAST_REFRESH_TIME = currentTime;
       console.log('[GLOBAL TIMER] Rate limited, reset timer:', {
-        timestamp: lastRefreshTime,
-        readableTime: new Date(lastRefreshTime * 1000).toISOString(),
-        nextRefreshAt: new Date((lastRefreshTime + COOLDOWN_DURATION) * 1000).toISOString()
+        timestamp: GLOBAL_LAST_REFRESH_TIME,
+        readableTime: new Date(GLOBAL_LAST_REFRESH_TIME * 1000).toISOString(),
+        readableTimeIST: formatInIST(new Date(GLOBAL_LAST_REFRESH_TIME * 1000)),
+        nextRefreshAt: new Date((GLOBAL_LAST_REFRESH_TIME + COOLDOWN_DURATION) * 1000).toISOString(),
+        nextRefreshAtIST: formatInIST(new Date((GLOBAL_LAST_REFRESH_TIME + COOLDOWN_DURATION) * 1000))
       });
     }
 
     // Return a more specific error message
-    return NextResponse.json(
+    const errorResponse = NextResponse.json(
       { 
         error: 'Failed to fetch tweets',
         details: err.response?.data?.detail || err.message,
         tweets: mockTweets, // Return mock tweets on error
         timeUntilRefresh: remainingTime,
         canRefresh: false,
-        lastRefreshTime
+        lastRefreshTime: GLOBAL_LAST_REFRESH_TIME
       },
       { status: 200 } // Return 200 instead of error code to prevent console errors
     );
+    
+    // Add timer info to headers
+    errorResponse.headers.set('x-server-time', currentTime.toString());
+    errorResponse.headers.set('x-last-refresh-time', GLOBAL_LAST_REFRESH_TIME?.toString() || '0');
+    errorResponse.headers.set('x-time-until-refresh', remainingTime.toString());
+    errorResponse.headers.set('x-can-refresh', 'false');
+    
+    return errorResponse;
   }
 } 

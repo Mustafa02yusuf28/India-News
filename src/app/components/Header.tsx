@@ -80,6 +80,7 @@ export default function Header() {
                   <span>INDIA-</span>
                   <span>P*KassTAN</span>
                   <span>News MONITOR</span>
+                  <span>Click on Refresh to Load tweets</span>
                 </h1>
               </div>
             </div>

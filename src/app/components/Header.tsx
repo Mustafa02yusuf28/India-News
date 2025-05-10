@@ -80,7 +80,7 @@ export default function Header() {
                   <span>INDIA-</span>
                   <span>P*KassTAN</span>
                   <span>News MONITOR</span>
-                  <span>Click on Refresh to Load tweets</span>
+                
                 </h1>
               </div>
             </div>
@@ -88,6 +88,8 @@ export default function Header() {
             {/* Subtitle section */}
             <div className="mt-2 text-xs text-gray-400">
               <p className="uppercase tracking-wider">LATEST UPDATES ON THE ONGOING SITUATION</p>
+              <p className="uppercase tracking-wider">Click on Refresh to Load tweets</p>
+
               <p className="text-xs text-gray-500 mt-1">{currentDate}</p>
             </div>
           </div>

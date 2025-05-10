@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import Parser from 'rss-parser';
-import axios from 'axios';
 
 const parser = new Parser();
 

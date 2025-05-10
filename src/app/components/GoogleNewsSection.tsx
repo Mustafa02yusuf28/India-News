@@ -21,74 +21,58 @@ export default function GoogleNewsSection() {
 
   // Fetch data on component mount
   useEffect(() => {
+    const fetchNews = async (showLoading = true) => {
+      try {
+        if (showLoading) {
+          setLoading(true);
+        }
+        // Fetch data from API that serves the same cached data to all users
+        const response = await axios.get('/api/google-news');
+        const newArticles = response.data.articles;
+        if (newArticles.length > 0 || articles.length === 0) {
+          setArticles(newArticles);
+        }
+        const now = new Date();
+        const formattedDate = now.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+        setLastUpdated(formattedDate);
+        setError('');
+      } catch (err) {
+        console.error('Error fetching news:', err);
+        if (articles.length === 0) {
+          setError('Failed to load news. Updates will be attempted automatically.');
+        }
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    };
     fetchNews();
-    
-    // Refresh news every 5 minutes (300000 ms) but only if the tab is visible
     const intervalId = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        fetchNews(false); // silent refresh
+        fetchNews(false);
       }
     }, 300000);
-    
-    // Add visibility change listener to refresh when tab becomes visible again
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && lastUpdated) {
         const lastUpdateTime = new Date(lastUpdated).getTime();
         const now = new Date().getTime();
         const minutesSinceLastUpdate = (now - lastUpdateTime) / 60000;
-        
-        // If it's been more than 5 minutes since the last update, refresh
         if (minutesSinceLastUpdate > 5) {
-          fetchNews(false); // silent refresh
+          fetchNews(false);
         }
       }
     };
-    
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Clean up interval and event listener on component unmount
     return () => {
       clearInterval(intervalId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [lastUpdated]);
-
-  const fetchNews = async (showLoading = true) => {
-    try {
-      if (showLoading) {
-        setLoading(true);
-      }
-      
-      // Fetch data from API that serves the same cached data to all users
-      const response = await axios.get('/api/google-news');
-      const newArticles = response.data.articles;
-      
-      // Update state only if there are new articles or this is the first load
-      if (newArticles.length > 0 || articles.length === 0) {
-        setArticles(newArticles);
-      }
-      
-      // Format the last updated time in a consistent way
-      const now = new Date();
-      const formattedDate = now.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-      setLastUpdated(formattedDate);
-      
-      setError('');
-    } catch (err) {
-      console.error('Error fetching news:', err);
-      if (articles.length === 0) {
-        setError('Failed to load news. Updates will be attempted automatically.');
-      }
-    } finally {
-      if (showLoading) {
-        setLoading(false);
-      }
-    }
-  };
+  }, [articles.length, lastUpdated]);
 
   if (loading && articles.length === 0) {
     return (

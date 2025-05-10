@@ -10,12 +10,11 @@ type ViewMode = 'both' | 'google' | 'twitter';
 
 export default function Home() {
   const [activeView, setActiveView] = useState<ViewMode>('both');
-  const [isMobile, setIsMobile] = useState(false);
   
   // Check viewport size on mount and resize
   useEffect(() => {
     const checkIfMobile = () => {
-      setIsMobile(window.innerWidth < 768);
+      // setIsMobile(window.innerWidth < 768); // No longer needed
     };
     
     // Initial check

@@ -19,73 +19,57 @@ export default function TwitterSection() {
 
   // Fetch data on component mount
   useEffect(() => {
+    const fetchTweets = async (showLoading = true) => {
+      try {
+        if (showLoading) {
+          setLoading(true);
+        }
+        // Fetch data from API that serves the same cached data to all users
+        const response = await axios.get('/api/twitter');
+        if (response.data.tweets.length > 0 || tweets.length === 0) {
+          setTweets(response.data.tweets);
+        }
+        const now = new Date();
+        const formattedTime = now.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+        setLastUpdated(formattedTime);
+        setError('');
+      } catch (err) {
+        console.error('Error fetching tweets:', err);
+        if (tweets.length === 0) {
+          setError('Failed to load tweets. Updates will be attempted automatically.');
+        }
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    };
     fetchTweets();
-    
-    // Refresh tweets every 5 minutes (300000 ms) but only if the tab is visible
     const intervalId = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        fetchTweets(false); // silent refresh
+        fetchTweets(false);
       }
     }, 300000);
-    
-    // Add visibility change listener to refresh when tab becomes visible again
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && lastUpdated) {
         const lastUpdateTime = new Date(lastUpdated).getTime();
         const now = new Date().getTime();
         const minutesSinceLastUpdate = (now - lastUpdateTime) / 60000;
-        
-        // If it's been more than 5 minutes since the last update, refresh
         if (minutesSinceLastUpdate > 5) {
-          fetchTweets(false); // silent refresh
+          fetchTweets(false);
         }
       }
     };
-    
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Clean up interval and event listener on component unmount
     return () => {
       clearInterval(intervalId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [lastUpdated]);
-
-  const fetchTweets = async (showLoading = true) => {
-    try {
-      if (showLoading) {
-        setLoading(true);
-      }
-      
-      // Fetch data from API that serves the same cached data to all users
-      const response = await axios.get('/api/twitter');
-      
-      // Update state only if there are new tweets or this is the first load
-      if (response.data.tweets.length > 0 || tweets.length === 0) {
-        setTweets(response.data.tweets);
-      }
-      
-      // Format the last updated time in a consistent way
-      const now = new Date();
-      const formattedTime = now.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-      setLastUpdated(formattedTime);
-      
-      setError('');
-    } catch (err) {
-      console.error('Error fetching tweets:', err);
-      if (tweets.length === 0) {
-        setError('Failed to load tweets. Updates will be attempted automatically.');
-      }
-    } finally {
-      if (showLoading) {
-        setLoading(false);
-      }
-    }
-  };
+  }, [tweets.length, lastUpdated]);
 
   // Function to format date consistently
   const formatTweetDate = (dateString: string) => {

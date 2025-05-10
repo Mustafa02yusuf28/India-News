@@ -14,9 +14,9 @@ const redis = new Redis({
 });
 
 export async function GET() {
-  const tweet = await redis.get<Tweet>('latest_tweet');
-  if (!tweet) {
+  const data = await redis.get<{ tweet: Tweet; timestamp: number }>('latest_tweet');
+  if (!data || !data.tweet) {
     return NextResponse.json({ tweet: null, message: 'No tweet cached yet.' });
   }
-  return NextResponse.json({ tweet });
+  return NextResponse.json({ tweet: data.tweet, lastUpdated: data.timestamp });
 } 

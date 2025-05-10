@@ -47,7 +47,10 @@ export async function GET() {
   try {
     const tweet = await getLatestTweet();
     if (tweet) {
-      await redis.set('latest_tweet', tweet);
+      await redis.set('latest_tweet', {
+        tweet,
+        timestamp: Date.now()
+      });
     }
     return NextResponse.json({ success: true, tweet });
   } catch (err) {

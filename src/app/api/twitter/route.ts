@@ -64,7 +64,7 @@ async function getTweets(): Promise<RawTweet[]> {
         
         if (response.data.data && response.data.data.length > 0) {
           console.log(`Successfully fetched ${response.data.data.length} tweets from Twitter API`);
-          return response.data.data.map((tweet: any) => ({
+          return response.data.data.map((tweet: { id: string; text: string; created_at: string }) => ({
             id: tweet.id,
             text: tweet.text,
             created_at: tweet.created_at,
@@ -74,12 +74,20 @@ async function getTweets(): Promise<RawTweet[]> {
           console.log('No tweets found in Twitter API response, using mock data');
           return getMockTweets();
         }
-      } catch (fetchError: any) {
-        console.error('Error fetching tweets from Twitter API:', fetchError.message);
+      } catch (fetchError: unknown) {
+        if (fetchError instanceof Error) {
+          console.error('Error fetching tweets from Twitter API:', fetchError.message);
+        } else {
+          console.error('Unknown error fetching tweets from Twitter API');
+        }
         return getMockTweets();
       }
-    } catch (error: any) {
-      console.error('Error in Twitter API process:', error.message);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Error in Twitter API process:', error.message);
+      } else {
+        console.error('Unknown error in Twitter API process');
+      }
       // Fall back to mock data
       return getMockTweets();
     }

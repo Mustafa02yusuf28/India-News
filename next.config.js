@@ -1,11 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Disable experimental turbopack in production
-  // but allow it in development
+  // Configure next.js settings
   experimental: {
-    turbo: process.env.NODE_ENV === 'development'
-  },
-  // Add any other configuration options here
+    // Configure server actions properly for Next.js 15.3.2
+    serverActions: {
+      allowedOrigins: ['localhost:3000', 'india-news-beta.vercel.app']
+    }
+  }
 };
 
 module.exports = nextConfig; 

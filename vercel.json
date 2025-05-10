@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron-refresh-twitter",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+} 

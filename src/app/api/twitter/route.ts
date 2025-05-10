@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 
-declare let latestTweet: any;
+type Tweet = {
+  id: string;
+  text: string;
+  created_at: string;
+  [key: string]: unknown;
+};
+
+declare let latestTweet: Tweet | null;
 
 export async function GET() {
   if (typeof latestTweet === 'undefined' || latestTweet === null) {

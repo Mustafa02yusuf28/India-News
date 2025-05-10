@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
 
-let latestTweet: any = null; // In-memory cache
+type Tweet = {
+  id: string;
+  text: string;
+  created_at: string;
+  [key: string]: unknown;
+};
+
+let latestTweet: Tweet | null = null; // In-memory cache
 
 const TWITTER_HANDLE = 'sidhant';
 
-async function getLatestTweet(): Promise<any> {
+async function getLatestTweet(): Promise<Tweet | null> {
   const bearerToken = process.env.TWITTER_BEARER_TOKEN;
   if (!bearerToken) return null;
   // Get user ID
@@ -22,7 +29,14 @@ async function getLatestTweet(): Promise<any> {
       headers: { Authorization: `Bearer ${bearerToken}` }
     }
   );
-  return tweetResp.data.data?.[0] || null;
+  const tweet = tweetResp.data.data?.[0];
+  if (!tweet) return null;
+  return {
+    id: tweet.id,
+    text: tweet.text,
+    created_at: tweet.created_at,
+    ...tweet
+  };
 }
 
 export async function GET() {

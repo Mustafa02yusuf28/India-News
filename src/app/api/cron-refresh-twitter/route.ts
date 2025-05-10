@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
+import { Redis } from '@upstash/redis';
 
 type Tweet = {
   id: string;
@@ -8,7 +9,10 @@ type Tweet = {
   [key: string]: unknown;
 };
 
-let latestTweet: Tweet | null = null; // In-memory cache
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
 const TWITTER_HANDLE = 'sidhant';
 
@@ -41,8 +45,11 @@ async function getLatestTweet(): Promise<Tweet | null> {
 
 export async function GET() {
   try {
-    latestTweet = await getLatestTweet();
-    return NextResponse.json({ success: true, tweet: latestTweet });
+    const tweet = await getLatestTweet();
+    if (tweet) {
+      await redis.set('latest_tweet', tweet);
+    }
+    return NextResponse.json({ success: true, tweet });
   } catch (err) {
     return NextResponse.json({ error: 'Failed to fetch tweet', details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

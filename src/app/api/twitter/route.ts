@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { Redis } from '@upstash/redis';
 
 type Tweet = {
   id: string;
@@ -7,11 +8,15 @@ type Tweet = {
   [key: string]: unknown;
 };
 
-declare let latestTweet: Tweet | null;
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
 export async function GET() {
-  if (typeof latestTweet === 'undefined' || latestTweet === null) {
+  const tweet = await redis.get<Tweet>('latest_tweet');
+  if (!tweet) {
     return NextResponse.json({ tweet: null, message: 'No tweet cached yet.' });
   }
-  return NextResponse.json({ tweet: latestTweet });
+  return NextResponse.json({ tweet });
 } 

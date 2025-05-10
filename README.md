@@ -5,7 +5,7 @@ A responsive web application that aggregates and displays the latest news about 
 ## Features
 
 - **Google News Section**: Fetches and displays the latest news articles from Google News about the India-Pakistan situation.
-- **Twitter Updates**: Shows tweets from specific handles (@ndtv, @ANI, @PTIofficial, @BBCWorld) with rephrased content using a free LLM.
+- **Twitter Updates**: Shows tweets from specific handles (@ndtv, @ANI, @PTIofficial, @BBCWorld) 
 - **Responsive Design**: Works seamlessly on mobile, tablet, and desktop devices.
 - **Fast Loading**: Optimized for performance with minimal load times.
 - **Toggle Original/Rephrased**: Toggle between original and rephrased tweets.

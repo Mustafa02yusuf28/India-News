@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
+import { kv } from '@vercel/kv';
 
 // Twitter handle to track
 const TWITTER_HANDLE = 'sidhant';
@@ -164,21 +165,13 @@ async function getUserId(username: string, bearerToken: string): Promise<string 
 
 export async function GET() {
   try {
-    // Get tweets (real or mock)
-    const tweets = await getTweets();
-    
-    // Sort by date (newest first)
-    tweets.sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-
-    return NextResponse.json({ tweets }, { status: 200 });
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Error in Twitter API route:', errorMessage);
-    return NextResponse.json(
-      { error: 'Failed to fetch tweets', message: errorMessage },
-      { status: 500 }
-    );
+    const cached = await kv.get('twitter-tweets');
+    if (cached) {
+      return NextResponse.json(JSON.parse(cached.toString()));
+    } else {
+      return NextResponse.json({ tweets: [] });
+    }
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to fetch tweets' }, { status: 500 });
   }
 } 

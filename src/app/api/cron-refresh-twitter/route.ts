@@ -14,20 +14,15 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-const TWITTER_HANDLE = 'sidhant';
+// Hardcoded user ID for @sidhant (replace with actual ID)
+const TWITTER_USER_ID = '25073877';
 
 async function getLatestTweet(): Promise<Tweet | null> {
   const bearerToken = process.env.TWITTER_BEARER_TOKEN;
   if (!bearerToken) return null;
-  // Get user ID
-  const userResp = await axios.get(
-    `https://api.twitter.com/2/users/by/username/${TWITTER_HANDLE}`,
-    { headers: { Authorization: `Bearer ${bearerToken}` } }
-  );
-  const userId = userResp.data.data.id;
-  // Get latest tweet
+  // Only call the tweets endpoint
   const tweetResp = await axios.get(
-    `https://api.twitter.com/2/users/${userId}/tweets`,
+    `https://api.twitter.com/2/users/${TWITTER_USER_ID}/tweets`,
     {
       params: { max_results: 1, 'tweet.fields': 'created_at' },
       headers: { Authorization: `Bearer ${bearerToken}` }

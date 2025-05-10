@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 
 interface Tweet {
   id: string;
@@ -14,6 +14,14 @@ interface Tweet {
     like_count: number;
     quote_count: number;
   };
+}
+
+interface TwitterResponse {
+  tweets: Tweet[];
+  timeUntilRefresh?: number;
+  canRefresh?: boolean;
+  error?: string;
+  details?: string;
 }
 
 interface TwitterContextType {
@@ -29,7 +37,6 @@ interface TwitterContextType {
 const TwitterContext = createContext<TwitterContextType | undefined>(undefined);
 
 const COOLDOWN_DURATION = 15 * 60; // 15 minutes in seconds
-const TWITTER_USER_ID = '25073877'; // @sidhant's Twitter ID
 
 // Get last refresh time from localStorage
 const getLastRefreshTime = (): number | null => {
@@ -103,7 +110,7 @@ export function TwitterProvider({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true);
       setError(null);
-      const response = await axios.get('/api/twitter');
+      const response = await axios.get<TwitterResponse>('/api/twitter');
       
       if (response.data.tweets) {
         setTweets(response.data.tweets);
@@ -117,20 +124,21 @@ export function TwitterProvider({ children }: { children: React.ReactNode }) {
       } else {
         throw new Error('Invalid response format from Twitter API');
       }
-    } catch (err: any) {
+    } catch (err) {
+      const error = err as AxiosError<TwitterResponse>;
       console.error('Error fetching tweets:', {
-        error: err.message,
-        status: err.response?.status,
-        data: err.response?.data,
+        error: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
         timestamp: new Date().toISOString()
       });
-      if (err.response?.status === 429) {
+      if (error.response?.status === 429) {
         setError('Rate limit exceeded. Please wait 15 minutes before trying again.');
         // Force cooldown on rate limit
         setLastRefreshTime(currentTime);
         saveLastRefreshTime(currentTime);
       } else {
-        setError(err.response?.data?.details || 'Failed to load tweets. Please try again later.');
+        setError(error.response?.data?.details || 'Failed to load tweets. Please try again later.');
       }
     } finally {
       setLoading(false);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 
 interface Tweet {
   id: string;
@@ -10,9 +10,17 @@ interface Tweet {
   author: string;
 }
 
+interface TwitterResponse {
+  tweets: Tweet[];
+  timeUntilRefresh: number;
+  canRefresh: boolean;
+  error?: string;
+  details?: string;
+}
+
 export default function TwitterSection() {
   const [tweets, setTweets] = useState<Tweet[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [showAllTweets, setShowAllTweets] = useState(false);
@@ -30,11 +38,19 @@ export default function TwitterSection() {
   // Move fetchTweets to top-level so it can be used in useEffect and as a handler
   const fetchTweets = async (showLoading = true) => {
     try { 
+      // Only proceed if we can refresh - double check here
+      if (!canRefresh) {
+        console.log('Fetch prevented - timer not expired yet');
+        setError(`Please wait ${formatCountdown(timeUntilRefresh)} before refreshing again`);
+        return;
+      }
+
       if (showLoading) {
         setLoading(true);
       }
+      
       // Fetch data from API that serves the same cached data to all users
-      const response = await axios.get('/api/twitter');
+      const response = await axios.get<TwitterResponse>('/api/twitter');
       console.log('Response received:', response.data); // Log the response data
       
       // Update timer and refresh status
@@ -63,24 +79,25 @@ export default function TwitterSection() {
       });
       setLastUpdated(formattedTime);
       setError('');
-    } catch (err: any) {
-      console.error('Error fetching tweets:', err);
+    } catch (err) {
+      const error = err as AxiosError<TwitterResponse>;
+      console.error('Error fetching tweets:', error);
       
       // Update the timer even on error if available
-      if (err.response?.data?.timeUntilRefresh !== undefined) {
-        setTimeUntilRefresh(err.response.data.timeUntilRefresh);
+      if (error.response?.data?.timeUntilRefresh !== undefined) {
+        setTimeUntilRefresh(error.response.data.timeUntilRefresh);
         console.log('Client timer updated from error response:', {
-          timeUntilRefresh: err.response.data.timeUntilRefresh,
-          canRefresh: err.response.data.canRefresh
+          timeUntilRefresh: error.response.data.timeUntilRefresh,
+          canRefresh: error.response.data.canRefresh
         });
       }
       
-      if (err.response?.data?.canRefresh !== undefined) {
-        setCanRefresh(err.response.data.canRefresh);
+      if (error.response?.data?.canRefresh !== undefined) {
+        setCanRefresh(error.response.data.canRefresh);
       }
       
       if (tweets.length === 0) {
-        setError(err.response?.data?.details || 'Failed to load tweets. Updates will be attempted automatically.');
+        setError(error.response?.data?.details || 'Failed to load tweets. Please click refresh when timer completes.');
       }
     } finally {
       if (showLoading) {
@@ -89,10 +106,8 @@ export default function TwitterSection() {
     }
   };
 
-  // Fetch data on component mount
+  // ONLY update the timer - NO automatic API calls on mount
   useEffect(() => {
-    fetchTweets();
-    
     // Set up interval to update timer every second
     const timerIntervalId = setInterval(() => {
       setTimeUntilRefresh(prev => {
@@ -105,32 +120,18 @@ export default function TwitterSection() {
       });
     }, 1000);
     
-    // Set up interval to check for updates
-    const updateIntervalId = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        fetchTweets(false);
-      }
-    }, 300000);
-    
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && lastUpdated) {
-        const lastUpdateTime = new Date(lastUpdated).getTime();
-        const now = new Date().getTime();
-        const minutesSinceLastUpdate = (now - lastUpdateTime) / 60000;
-        if (minutesSinceLastUpdate > 5) {
-          fetchTweets(false);
-        }
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    // Log the initial timer state
+    console.log('Timer initialized:', {
+      timeUntilRefresh,
+      canRefresh,
+      currentTime: new Date().toISOString()
+    });
     
     return () => {
       clearInterval(timerIntervalId);
-      clearInterval(updateIntervalId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [lastUpdated]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   // Function to format date consistently
   const formatTweetDate = (dateString: string) => {
@@ -253,7 +254,22 @@ export default function TwitterSection() {
       )}
       
       {tweets.length === 0 ? (
-        <p className="text-gray-500 dark:text-gray-400">No tweets available.</p>
+        <div className="p-8 text-center">
+          <p className="text-gray-500 dark:text-gray-400 mb-4">No tweets available.</p>
+          {canRefresh && (
+            <button
+              onClick={() => fetchTweets()}
+              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+            >
+              Load Tweets
+            </button>
+          )}
+          {!canRefresh && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Please wait for the timer to complete before loading tweets.
+            </p>
+          )}
+        </div>
       ) : (
         <div className="space-y-6">
           {/* Latest 3 tweets */}

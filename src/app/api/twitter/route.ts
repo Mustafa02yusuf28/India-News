@@ -9,7 +9,8 @@ export async function GET() {
     } else {
       return NextResponse.json({ tweets: [] });
     }
-  } catch {
-    return NextResponse.json({ error: 'Failed to fetch tweets' }, { status: 500 });
+  } catch (err) {
+    console.error('Error in /api/twitter:', err);
+    return NextResponse.json({ error: 'Failed to fetch tweets', details: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 } 

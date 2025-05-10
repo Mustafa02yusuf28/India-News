@@ -25,16 +25,23 @@ async function getUserId(username: string, bearerToken: string): Promise<string 
       return response.data.data.id;
     }
     return null;
-  } catch {
+  } catch (err) {
+    console.error('Error fetching user ID:', err);
     return null;
   }
 }
 
 async function fetchLatestTweets(): Promise<RawTweet[]> {
   const bearerToken = process.env.TWITTER_BEARER_TOKEN;
-  if (!bearerToken) return [];
+  if (!bearerToken) {
+    console.error('No Twitter Bearer Token set in environment variables.');
+    return [];
+  }
   const userId = await getUserId(TWITTER_HANDLE, bearerToken);
-  if (!userId) return [];
+  if (!userId) {
+    console.error('No user ID found for Twitter handle.');
+    return [];
+  }
   try {
     const response = await axios.get(
       `https://api.twitter.com/2/users/${userId}/tweets`,
@@ -58,7 +65,8 @@ async function fetchLatestTweets(): Promise<RawTweet[]> {
       }));
     }
     return [];
-  } catch {
+  } catch (err) {
+    console.error('Error fetching tweets from Twitter API:', err);
     return [];
   }
 }
@@ -68,7 +76,11 @@ export async function GET() {
     const tweets = await fetchLatestTweets();
     await kv.set('twitter-tweets', JSON.stringify({ tweets, timestamp: Date.now() }));
     return NextResponse.json({ success: true, count: tweets.length });
-  } catch {
-    return NextResponse.json({ error: 'Failed to refresh tweets' }, { status: 500 });
+  } catch (err) {
+    console.error('Error in cron-refresh-twitter:', err);
+    return NextResponse.json({
+      error: 'Failed to refresh tweets',
+      details: err instanceof Error ? err.message : String(err)
+    }, { status: 500 });
   }
 } 
